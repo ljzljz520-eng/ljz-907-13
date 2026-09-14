@@ -6,6 +6,7 @@ import MovieCard from './components/MovieCard.vue';
 import Pagination from './components/Pagination.vue';
 import UploadModal from './components/UploadModal.vue';
 import MovieDetailModal from './components/MovieDetailModal.vue';
+import ScreeningManagerModal from './components/ScreeningManagerModal.vue';
 import { Loader2, Film, Search } from 'lucide-vue-next';
 
 const movies = ref([]);
@@ -14,6 +15,7 @@ const lastPage = ref(1);
 const loading = ref(true);
 const isUploadOpen = ref(false);
 const isDetailOpen = ref(false);
+const isScreeningManagerOpen = ref(false);
 const selectedMovie = ref(null);
 const searchQuery = ref('');
 
@@ -34,6 +36,17 @@ const fetchMovies = async (page = 1) => {
     console.error('Failed to fetch movies:', error);
   } finally {
     loading.value = false;
+  }
+};
+
+// 刷新当前选中影片的详情（含全部排期）
+const refreshSelectedMovie = async () => {
+  if (!selectedMovie.value) return;
+  try {
+    const res = await axios.get(`http://localhost:8000/api/movies/${selectedMovie.value.id}`);
+    selectedMovie.value = res.data;
+  } catch (error) {
+    console.error('Failed to refresh movie detail:', error);
   }
 };
 
@@ -58,9 +71,28 @@ const handleUploadSuccess = () => {
   fetchMovies(1); // Refresh to first page
 };
 
-const openDetail = (movie) => {
+const openDetail = async (movie) => {
   selectedMovie.value = movie;
   isDetailOpen.value = true;
+  // 拉取完整详情（含全部放映排期：近期 + 历史）
+  await refreshSelectedMovie();
+};
+
+const openScreeningManager = (movie) => {
+  isScreeningManagerOpen.value = true;
+};
+
+// 排期变更后：刷新列表（卡片近期场次）与详情（排期区块）
+const handleScreeningsChanged = () => {
+  fetchMovies(currentPage.value);
+  refreshSelectedMovie();
+};
+
+const handleMovieDeleted = (id) => {
+  isDetailOpen.value = false;
+  isScreeningManagerOpen.value = false;
+  selectedMovie.value = null;
+  fetchMovies(currentPage.value);
 };
 </script>
 
@@ -132,10 +164,19 @@ const openDetail = (movie) => {
       @upload-success="handleUploadSuccess"
     />
 
-    <MovieDetailModal 
+    <MovieDetailModal
       :is-open="isDetailOpen"
       :movie="selectedMovie"
       @close="isDetailOpen = false"
+      @manage-screenings="openScreeningManager"
+      @deleted="handleMovieDeleted"
+    />
+
+    <ScreeningManagerModal
+      :is-open="isScreeningManagerOpen"
+      :movie="selectedMovie"
+      @close="isScreeningManagerOpen = false"
+      @changed="handleScreeningsChanged"
     />
   </div>
 </template>

@@ -14,7 +14,8 @@ class MovieController extends Controller
         $perPage = $request->input('per_page', 18);
         $search = $request->input('search');
 
-        $query = Movie::query();
+        // 预载近期放映排期，供影片卡片展示
+        $query = Movie::with('upcomingScreenings');
 
         if ($search) {
             $query->where(function($q) use ($search) {
@@ -33,11 +34,38 @@ class MovieController extends Controller
 
     public function show($id)
     {
-        $movie = Movie::find($id);
+        // 详情返回全部排期（近期 + 历史），由前端按 is_upcoming 分组展示
+        $movie = Movie::with(['screenings' => function ($q) {
+            $q->orderBy('screening_date')->orderBy('start_time');
+        }])->find($id);
+
         if (!$movie) {
             return response()->json(['error' => 'Movie not found'], 404);
         }
         return response()->json($movie);
+    }
+
+    /**
+     * 删除影片：存在关联排期时拒绝删除并提示先处理排期
+     */
+    public function destroy($id)
+    {
+        $movie = Movie::find($id);
+        if (!$movie) {
+            return response()->json(['error' => 'Movie not found'], 404);
+        }
+
+        $screeningsCount = $movie->screenings()->count();
+        if ($screeningsCount > 0) {
+            return response()->json([
+                'error' => "该影片还有 {$screeningsCount} 场关联放映排期，请先处理关联排期后再删除影片。",
+                'screenings_count' => $screeningsCount,
+            ], 409);
+        }
+
+        $movie->delete();
+
+        return response()->json(['status' => 'success']);
     }
 
     public function upload(Request $request)

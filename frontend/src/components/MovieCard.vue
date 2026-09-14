@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
-import { Star } from 'lucide-vue-next';
+import { Star, Ticket } from 'lucide-vue-next';
+import { formatScreeningDate, formatScreeningTime } from '../utils/screening';
 
 const props = defineProps({
   movie: {
@@ -17,6 +18,9 @@ const poster = computed(() => {
   }
   return props.movie.poster_url;
 });
+
+// 近期可看的放映场次（后端已按时间升序、过滤掉过期场次）
+const upcomingScreenings = computed(() => props.movie.upcoming_screenings || []);
 
 // 处理图片加载错误
 const handleImageError = (event) => {
@@ -75,6 +79,21 @@ const handleImageError = (event) => {
       <div class="flex items-center justify-between text-xs text-gray-500">
         <span>{{ movie.year }}</span>
         <span v-if="movie.genre" class="max-w-[60%] truncate rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider">{{ movie.genre.split(',')[0] }}</span>
+      </div>
+
+      <!-- 近期公益放映场次 -->
+      <div v-if="upcomingScreenings.length" class="mt-1.5 space-y-1">
+        <div
+          v-for="s in upcomingScreenings.slice(0, 2)"
+          :key="s.id"
+          class="flex items-center gap-1.5 rounded bg-emerald-500/10 px-1.5 py-1 text-[10px] leading-tight text-emerald-300 ring-1 ring-emerald-500/20"
+        >
+          <Ticket class="h-3 w-3 shrink-0" />
+          <span class="truncate">{{ formatScreeningDate(s.screening_date) }} {{ formatScreeningTime(s.start_time) }} · {{ s.location }}</span>
+        </div>
+        <p v-if="upcomingScreenings.length > 2" class="pl-0.5 text-[10px] text-gray-500">
+          还有 {{ upcomingScreenings.length - 2 }} 场近期放映
+        </p>
       </div>
     </div>
   </div>

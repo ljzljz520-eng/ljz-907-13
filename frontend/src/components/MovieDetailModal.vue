@@ -1,13 +1,66 @@
 <script setup>
+import { ref, computed, watch } from 'vue';
 import { Dialog, DialogPanel, DialogTitle, TransitionRoot, TransitionChild } from '@headlessui/vue';
-import { X, Star, Calendar, User, Tag, Globe, MessageSquare, Clock, Edit3, Award, Image as ImageIcon, ExternalLink } from 'lucide-vue-next';
+import { X, Star, Calendar, User, Tag, Globe, MessageSquare, Clock, Edit3, Award, Image as ImageIcon, ExternalLink, Ticket, MapPin, Phone, History, Trash2, Loader2, AlertTriangle, Settings } from 'lucide-vue-next';
+import axios from 'axios';
+import { formatScreeningDate, formatScreeningTime, splitScreenings } from '../utils/screening';
 
 const props = defineProps({
   movie: Object,
   isOpen: Boolean
 });
 
-defineEmits(['close']);
+const emit = defineEmits(['close', 'manage-screenings', 'deleted']);
+
+// 近期 / 历史场次分组（过期场次由后端标记，自动归入历史）
+const screeningGroups = computed(() => splitScreenings(props.movie?.screenings));
+const showHistory = ref(false);
+
+watch(() => props.isOpen, (open) => {
+  if (open) {
+    showHistory.value = false;
+    resetDeleteState();
+  }
+});
+
+// ---- 删除影片 ----
+const confirmingDelete = ref(false);
+const deleting = ref(false);
+const deleteError = ref(null);
+// 删除被阻止（存在关联排期）时的提示
+const blockedInfo = ref(null);
+
+const resetDeleteState = () => {
+  confirmingDelete.value = false;
+  deleting.value = false;
+  deleteError.value = null;
+  blockedInfo.value = null;
+};
+
+const confirmDelete = async () => {
+  if (!props.movie) return;
+  deleting.value = true;
+  deleteError.value = null;
+  blockedInfo.value = null;
+  try {
+    await axios.delete(`http://localhost:8000/api/movies/${props.movie.id}`);
+    emit('deleted', props.movie.id);
+    resetDeleteState();
+  } catch (e) {
+    if (e.response?.status === 409) {
+      // 存在关联排期：提示先处理排期
+      blockedInfo.value = {
+        message: e.response.data.error,
+        count: e.response.data.screenings_count
+      };
+      confirmingDelete.value = false;
+    } else {
+      deleteError.value = e.response?.data?.error || '删除失败，请稍后重试';
+    }
+  } finally {
+    deleting.value = false;
+  }
+};
 </script>
 
 <template>
@@ -163,6 +216,111 @@ defineEmits(['close']);
                     <p class="text-gray-400 leading-loose text-sm whitespace-pre-wrap italic">
                       {{ movie.awards }}
                     </p>
+                  </div>
+
+                  <!-- 公益放映排期 -->
+                  <div class="mb-10">
+                    <div class="flex items-center justify-between mb-4">
+                      <div class="flex items-center gap-2 text-white">
+                        <div class="h-4 w-1 bg-emerald-500 rounded-full"></div>
+                        <h3 class="text-lg font-bold">公益放映</h3>
+                      </div>
+                      <button
+                        @click="emit('manage-screenings', movie)"
+                        class="flex items-center gap-1.5 rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-300 ring-1 ring-white/10 transition hover:bg-white/10 hover:text-white"
+                      >
+                        <Settings class="h-3.5 w-3.5" /> 管理排期
+                      </button>
+                    </div>
+
+                    <!-- 近期场次 -->
+                    <div v-if="screeningGroups.upcoming.length" class="space-y-2">
+                      <div
+                        v-for="s in screeningGroups.upcoming" :key="s.id"
+                        class="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-xl bg-emerald-500/5 p-3 text-sm ring-1 ring-emerald-500/20"
+                      >
+                        <span class="flex items-center gap-1.5 font-medium text-emerald-300">
+                          <Ticket class="h-4 w-4" />
+                          {{ formatScreeningDate(s.screening_date) }} {{ formatScreeningTime(s.start_time) }}
+                        </span>
+                        <span class="flex items-center gap-1.5 text-gray-300">
+                          <MapPin class="h-3.5 w-3.5 text-gray-500" /> {{ s.location }}
+                        </span>
+                        <span class="flex items-center gap-1.5 text-xs text-gray-400">
+                          <User class="h-3.5 w-3.5 text-gray-500" /> {{ s.contact_name }}
+                          <span v-if="s.contact_phone" class="flex items-center gap-1">
+                            <Phone class="h-3 w-3 text-gray-500" /> {{ s.contact_phone }}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                    <p v-else class="rounded-xl bg-white/5 py-4 text-center text-sm text-gray-500">
+                      近期暂无放映安排
+                    </p>
+
+                    <!-- 历史场次（过期自动归入） -->
+                    <div v-if="screeningGroups.past.length" class="mt-3">
+                      <button
+                        @click="showHistory = !showHistory"
+                        class="flex items-center gap-1.5 text-xs text-gray-500 transition hover:text-gray-300"
+                      >
+                        <History class="h-3.5 w-3.5" />
+                        历史场次（{{ screeningGroups.past.length }}）
+                        <span>{{ showHistory ? '收起' : '展开' }}</span>
+                      </button>
+                      <div v-if="showHistory" class="mt-2 space-y-1.5">
+                        <p
+                          v-for="s in screeningGroups.past" :key="s.id"
+                          class="rounded-lg bg-white/[0.03] px-3 py-2 text-xs text-gray-500 ring-1 ring-white/5"
+                        >
+                          {{ formatScreeningDate(s.screening_date) }} {{ formatScreeningTime(s.start_time) }} · {{ s.location }} · 联系人 {{ s.contact_name }}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 删除影片 -->
+                  <div class="mt-auto border-t border-white/5 pt-6">
+                    <!-- 存在关联排期时的阻止提示 -->
+                    <div v-if="blockedInfo" class="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-amber-500/10 p-3 text-sm text-amber-300 ring-1 ring-amber-500/30">
+                      <AlertTriangle class="h-4 w-4 shrink-0" />
+                      <span class="flex-1">{{ blockedInfo.message }}</span>
+                      <button
+                        @click="emit('manage-screenings', movie)"
+                        class="rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-200 transition hover:bg-amber-500/30"
+                      >
+                        去处理排期
+                      </button>
+                    </div>
+
+                    <div v-if="deleteError" class="mb-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-400 ring-1 ring-red-500/30">
+                      {{ deleteError }}
+                    </div>
+
+                    <div v-if="!confirmingDelete" class="flex justify-end">
+                      <button
+                        @click="confirmingDelete = true"
+                        class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-gray-500 transition hover:bg-red-500/10 hover:text-red-400"
+                      >
+                        <Trash2 class="h-3.5 w-3.5" /> 删除影片
+                      </button>
+                    </div>
+                    <div v-else class="flex flex-wrap items-center justify-end gap-3">
+                      <span class="text-sm text-gray-400">确认删除该影片？此操作不可恢复。</span>
+                      <button
+                        @click="confirmingDelete = false"
+                        class="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-300 hover:text-white"
+                      >
+                        取消
+                      </button>
+                      <button
+                        @click="confirmDelete" :disabled="deleting"
+                        class="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-500 disabled:opacity-50"
+                      >
+                        <Loader2 v-if="deleting" class="h-3.5 w-3.5 animate-spin" />
+                        {{ deleting ? '删除中...' : '确认删除' }}
+                      </button>
+                    </div>
                   </div>
 
                 </div>

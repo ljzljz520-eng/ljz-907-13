@@ -6,6 +6,7 @@ use Illuminate\Database\Seeder;
 use App\Models\Movie;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 
 class MovieSeeder extends Seeder
 {
@@ -184,8 +185,14 @@ class MovieSeeder extends Seeder
     public function run(): void
     {
         // 清空现有数据（作为初始数据）
+        // 排期表有指向 movies 的外键，需先清排期再清影片
         $this->command->info("Clearing existing movies...");
+        Schema::disableForeignKeyConstraints();
+        if (Schema::hasTable('screenings')) {
+            DB::table('screenings')->truncate();
+        }
         Movie::truncate();
+        Schema::enableForeignKeyConstraints();
         $this->command->info("Existing movies cleared.");
         
         // CSV 文件路径（容器内的路径）

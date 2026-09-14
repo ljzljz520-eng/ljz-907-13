@@ -36,4 +36,23 @@ class Movie extends Model
         'rating' => 'decimal:1',
         'screenshots' => 'array',
     ];
+
+    /**
+     * 全部放映排期（一个影片可有多场放映）
+     */
+    public function screenings()
+    {
+        return $this->hasMany(Screening::class);
+    }
+
+    /**
+     * 近期（未过期）放映排期，按时间升序
+     */
+    public function upcomingScreenings()
+    {
+        return $this->hasMany(Screening::class)
+            ->upcoming()
+            ->orderBy('screening_date')
+            ->orderBy('start_time');
+    }
 }
